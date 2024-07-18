@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from typing import List
 
 
 class SCRFD(nn.Module):
@@ -13,16 +14,12 @@ class SCRFD(nn.Module):
         self.neck = neck
         self.bbox_head = bbox_head
 
-    def extract_feat(self, img):
-        """Directly extract features from the backbone+neck."""
+    @torch.no_grad()
+    def forward(self, img: torch.Tensor):
+        # x1 = self.extract_feat(img)
         x = self.backbone(img)
         x = self.neck(x)
-        return x
-
-    @torch.no_grad()
-    def forward(self, img):
-        x1 = self.extract_feat(img)
-        outs = self.bbox_head(x1)
+        outs = self.bbox_head(x)
 
         # list_strides = [8, 16, 32]
         list_scores = outs[0]
@@ -54,5 +51,5 @@ class SCRFD(nn.Module):
         net_outs.extend(scores_out)
         net_outs.extend(bboxes_out)
         net_outs.extend(kps_out)
-
-        return net_outs
+        
+        return net_outs[0], net_outs[1], net_outs[2], net_outs[3], net_outs[4], net_outs[5], net_outs[6], net_outs[7], net_outs[8]

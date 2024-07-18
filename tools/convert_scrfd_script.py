@@ -210,7 +210,7 @@ def generate_proposals_v2(score_blob: torch.Tensor,
     pos_bboxes = bboxes[pos_inds]
 
     kpss = distance2kps(anchors, kpss_blob, stride)
-    kpss = kpss.view((kpss.shape[0], -1, 2))
+    # kpss = kpss.view((kpss.shape[0], -1, 2))
     kpss_out = kpss[pos_inds]
 
     return score_out, pos_bboxes, kpss_out
@@ -283,10 +283,15 @@ class SCRFDDetector(torch.jit.ScriptModule):
         self.model = model_det
         self.model.eval()
         self.model.to(self.device)
+        
+        script_backbone = torch.jit.script(self.model)
+        script_backbone.save("models/backbone_det/1/backbone.ts")
 
 
     @torch.jit.script_method
-    def forward(self, imgs: List[torch.Tensor], threshold: float=0.5, target_size: int = 640) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+    # def forward(self, imgs: List[torch.Tensor], threshold: float=0.5, target_size: int = 640) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+    # def forward(self, imgs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, imgs: torch.Tensor) -> torch.Tensor:
         """
         Run detection pipeline for provided image
 
@@ -294,18 +299,16 @@ class SCRFDDetector(torch.jit.ScriptModule):
         :param threshold: Confidence threshold
         :return: Face bboxes with scores [t,l,b,r,score], and key points
         """
+        target_size = 640
+        threshold: float = 0.4
 
         batch_size: int = len(imgs)
         input_height = input_width = target_size
-        # start_time = time.time()
-        processed_tensor, all_scale = self.preprocess_batch(imgs, target_size=target_size)
-        # print("preprocess time: ", time.time() - start_time)
         
-        # start_time = time.time()
-        with torch.no_grad():
-            net_outs = self.model(processed_tensor)
-
-        # print("forward time: ", time.time() - start_time)
+        processed_tensor, all_scale = self.preprocess_batch(imgs, target_size=target_size)
+        
+        
+        net_outs = self.model(processed_tensor)
         
         dets_list = []
         kpss_list = []
@@ -328,8 +331,11 @@ class SCRFDDetector(torch.jit.ScriptModule):
         
         # print("post process time 2: ", time.time() - start_time)
         # print("===============================================================================")
-
-        return dets_list, kpss_list
+        # import ipdb; ipdb.set_trace()
+        # return_dets = torch.tensor(dets_list)
+        # return_kps = torch.tensor(kpss_list)
+        # return (dets_list[0], kpss_list[0])
+        return imgs
 
     @torch.jit.script_method
     def build_anchors(self, input_height: int, input_width: int, strides: List[int], num_anchors: int) -> List[torch.Tensor]:
@@ -358,56 +364,13 @@ class SCRFDDetector(torch.jit.ScriptModule):
             
         return centers
 
-    @torch.jit.script_method
-    def preprocess(self, img: torch.Tensor):
-        processed_image = img.permute(2, 0, 1)
-        processed_image = (processed_image - 127.5) * 0.0078125
-        processed_image = processed_image.unsqueeze(0)
-        return processed_image
-    
-    @torch.jit.script_method
-    def preprocess_single_image(self, image: torch.Tensor, target_size: int = 640) -> Tuple[torch.Tensor, int, int, float]:
-        image = image.permute(2, 0, 1).unsqueeze(0)
-        image = image.to(self.device).float()
-        scale: float = 1.
-        image_size = image.size()
-        image_height, image_width = int(image_size[-2]), int(image_size[-1])
-
-        if target_size != -1:
-            if max(image_height, image_width) > target_size:
-                if image_height >= image_width:
-                    scale = target_size / image_height
-                    new_height = target_size
-                    new_width = int(image_width * scale)
-                else:
-                    scale = target_size / image_width
-                    new_width = target_size
-                    new_height = int(image_height * scale)
-
-                # Mimic torchvision.transforms.ToTensor to use interpolate
-                resized_image = F.interpolate(image, size=(
-                    new_height, new_width), mode="bicubic", align_corners=False)
-            else:
-                new_height = image_height
-                new_width = image_width
-                resized_image = image
-        else:
-            new_height = image_height
-            new_width = image_width
-            resized_image = image
-
-        resized_image = resized_image.squeeze(0).permute(1, 2, 0)
-        
-        # resized_image -= self.mean_tensor  # mean substraction
-        # resized_image = resized_image.permute(2, 0, 1)
-        return resized_image, new_width, new_height, scale
-
     # @torch.jit.ignore
     @torch.jit.script_method
     def preprocess_batch(self,
-            images: List[torch.Tensor],
-            target_size: int = -1
-            ) -> Tuple[torch.Tensor, List[float]]:
+            # images: List[torch.Tensor],
+            images: torch.Tensor,
+            target_size: int = 640
+            ) -> Tuple[torch.Tensor, torch.Tensor]:
         # Resize on the longer side of the image to the target size (keep aspect ratio)
         batch_size = len(images)
         
@@ -485,7 +448,10 @@ class SCRFDDetector(torch.jit.ScriptModule):
             batched_tensor[index, :, :image_height,:image_width] = resized_image
         batched_tensor = (batched_tensor - 127.5) * 0.0078125
         
-        return batched_tensor, all_scale
+        # scale_tensor = torch.zeros((len()))
+        scale_tensor = torch.tensor(all_scale, device=self.device, dtype=torch.float32)
+        
+        return batched_tensor, scale_tensor
     
     @torch.jit.script_method
     # @torch.jit.ignore
@@ -577,11 +543,10 @@ class SCRFDDetector(torch.jit.ScriptModule):
         return bboxes_by_img, kpss_by_img, scores_by_img
 
     @torch.jit.script_method
-    # @torch.jit.ignore
     def filter_result(self, bboxes_list: torch.Tensor, 
             kpss_list: torch.Tensor,
             scores_list: torch.Tensor, 
-            scale: float,
+            scale: torch.Tensor,
             nms_threshold: float = 0.4
             ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -601,8 +566,10 @@ class SCRFDDetector(torch.jit.ScriptModule):
         det = pre_det[keep, :]
         det[:, :4] = det[:, :4] / scale
         
-        kept_kpss = kpss_list[keep, :, :]
-        kept_kpss = kept_kpss.reshape((kept_kpss.shape[0], -1, 2)) / scale
+        kept_kpss = kpss_list[keep, :] / scale
+        
+        # if len(kept_kpss):
+        #     kept_kpss = kept_kpss.reshape((kept_kpss.shape[0], -1, 2)) / scale
         
         return det, kept_kpss
 
@@ -613,19 +580,24 @@ if __name__ == '__main__':
     path = '/home/longduong/projects/face_project/scrfd/t1.jpg'
     img = cv2.imread(path)
     img_t = torch.from_numpy(img)
-    # script_model = torch.jit.script(model)
+    script_model = torch.jit.script(model)
+    script_model.save("models/face_detection/1/script_scrfd.ts")
     # script_model = torch.jit.optimize_for_inference(script_model)
     # det_list, kp_list = script_model.detect([img])
     
+    img_t = img_t.unsqueeze(0)
     for i in tqdm(range(1)):
-        # det_list, kp_list = script_model([img_t])
+        # det_list, kp_list = script_model(img_t)
         # print(det_list[0].shape)
-        det_list, kp_list = model([img_t])
+        # det_list, kp_list = model([img_t])
+        res = model.forward(img_t)
+        det_list, kp_list = res
         torch.cuda.synchronize()
    
-    bboxes = det_list[0]
-    kpss = kp_list[0]
+    bboxes = det_list
+    kpss = kp_list.reshape(-1, 5, 2)
     print(bboxes.shape)
+    print(kpss.shape)
     # if kpss is not None:
     #     print(kpss.shape)
     for i in range(len(bboxes)):
@@ -637,7 +609,6 @@ if __name__ == '__main__':
         for kp in kps:
             kp = kp.astype(np.int32)
             cv2.circle(img, tuple(kp) , 1, (0,0,255) , 2)
-
     
     print('output: debug_script.png',)
     cv2.imwrite('debug_script.png', img)
