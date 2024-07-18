@@ -1,0 +1,66 @@
+name: "backbone_det"
+platform: "pytorch_libtorch"
+default_model_filename: "backbone.ts"
+
+input: [
+    {
+        name: "INPUT__0"
+        data_type: TYPE_FP32
+        dims: [ -1, 3, 640, 640 ]
+    }
+]
+
+output: [
+    {
+        name: "OUTPUT__0"
+        data_type: TYPE_FP32
+        dims: [ -1, 12800, 1 ]
+    },
+    {
+        name: "OUTPUT__1"
+        data_type: TYPE_FP32
+        dims: [ -1, 3200, 1 ]
+    },
+    {
+        name: "OUTPUT__2"
+        data_type: TYPE_FP32
+        dims: [ -1, 800, 1 ]
+    },
+    {
+        name: "OUTPUT__3"
+        data_type: TYPE_FP32
+        dims: [ -1, 12800, 4 ]
+    },
+    {
+        name: "OUTPUT__4"
+        data_type: TYPE_FP32
+        dims: [ -1, 3200, 4 ]
+    },
+    {
+        name: "OUTPUT__5"
+        data_type: TYPE_FP32
+        dims: [ 800, 4 ]
+    },
+    {
+        name: "OUTPUT__6"
+        data_type: TYPE_FP32
+        dims: [ 12800, 10 ]
+    },
+    {
+        name: "OUTPUT__7"
+        data_type: TYPE_FP32
+        dims: [ 3200, 10 ]
+    },
+    {
+        name: "OUTPUT__8"
+        data_type: TYPE_FP32
+        dims: [ 800, 10 ]
+    }
+]
+
+instance_group: [
+    {
+        count: 1
+        kind: KIND_GPU
+    }
+]
