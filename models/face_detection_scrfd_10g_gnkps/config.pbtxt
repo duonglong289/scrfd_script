@@ -1,0 +1,79 @@
+name: "face_detection_scrfd_10g_gnkps"
+platform: "onnxruntime_onnx"
+max_batch_size: 4
+
+input [
+  {
+    name: "input.1"
+    data_type: TYPE_FP32
+    dims: [3, 640, 640]
+  }
+]
+output [
+  {
+    name: "score_8"
+    data_type: TYPE_FP32
+    dims: [-1, 1]
+  },
+  {
+    name: "score_16"
+    data_type: TYPE_FP32
+    dims: [-1, 1]
+  },
+  {
+    name: "score_32"
+    data_type: TYPE_FP32
+    dims: [-1, 1]
+  },
+  {
+    name: "bbox_8"
+    data_type: TYPE_FP32
+    dims: [-1, 4]
+  },
+  {
+    name: "bbox_16"
+    data_type: TYPE_FP32
+    dims: [-1, 4]
+  },
+  {
+    name: "bbox_32"
+    data_type: TYPE_FP32
+    dims: [-1, 4]
+  },
+  {
+    name: "kps_8"
+    data_type: TYPE_FP32
+    dims: [-1, 10]
+  },
+  {
+    name: "kps_16"
+    data_type: TYPE_FP32
+    dims: [-1, 10]
+  },
+  {
+    name: "kps_32"
+    data_type: TYPE_FP32
+    dims: [-1, 10]
+  }
+]
+
+model_warmup {
+    name: "Single sample"
+    batch_size: 1
+    inputs: {
+        key: "input.1"
+        value: {
+            data_type: TYPE_FP32
+            dims: [3, 640, 640]
+            random_data: true
+        }
+    }
+  }
+version_policy: {
+  specific: {
+    versions: [1]
+  }
+}
+dynamic_batching {
+  max_queue_delay_microseconds: 100
+}

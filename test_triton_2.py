@@ -5,7 +5,7 @@ from tqdm import tqdm
 from typing import List
 
 # model_name = 'backbone_det'
-model_name = 'face_detection_script_scrfd_10g'
+model_name = 'face_detection_scrfd_10g_gnkps'
 # model_name = 'face_detection_script_scrfd_10g_32'
 model_version = '1'
 triton_url = 'localhost:12001'
@@ -66,13 +66,23 @@ print(resized_img.shape)
 # img_t = img.astype(np.float32)
 # img_t = torch.from_numpy(img)
 # img_t = torch.unsqueeze(0)
-# resized_img = np.random.rand(1, 640, 640, 3).astype(np.float16)
-inputs = [input_client.InferInput('INPUT__0', resized_img.shape, 'FP16')]
-# inputs = [input_client.InferInput('INPUT__0', resized_img.shape, 'FP32')]
+resized_img = np.random.rand(1, 3, 640, 640).astype(np.float32)
+# inputs = [input_client.InferInput('INPUT__0', resized_img.shape, 'FP16')]
+inputs = [input_client.InferInput('input.1', resized_img.shape, 'FP32')]
 
 inputs[0].set_data_from_numpy(resized_img)
 # outputs = [input_client.InferRequestedOutput('OUTPUT__0'), input_client.InferRequestedOutput('OUTPUT__1')]
-outputs = [input_client.InferRequestedOutput('OUTPUT__0')]
+outputs = [
+    input_client.InferRequestedOutput('score_8'),
+    input_client.InferRequestedOutput('score_16'),
+    input_client.InferRequestedOutput('score_32'),
+    input_client.InferRequestedOutput('bbox_8'),
+    input_client.InferRequestedOutput('bbox_16'),
+    input_client.InferRequestedOutput('bbox_32'),
+    input_client.InferRequestedOutput('kps_8'),
+    input_client.InferRequestedOutput('kps_16'),
+    input_client.InferRequestedOutput('kps_32'),
+    ]
 
 # for i in tqdm(range(10000)):
 responses = triton_client.infer(model_name,
@@ -80,25 +90,25 @@ responses = triton_client.infer(model_name,
                             model_version=model_version,
                             outputs=outputs)
 
-preds_0 = responses.as_numpy('OUTPUT__0')
-# print(preds_0.shape)
+preds_0 = responses.as_numpy('score_8')
+print(preds_0.shape)
 
 
 
-for res in preds_0:
-    bbox = res[:4] / scale
-    score = res[4]
-    kps = res[5:].reshape(-1, 2) / scale
+# for res in preds_0:
+#     bbox = res[:4] / scale
+#     score = res[4]
+#     kps = res[5:].reshape(-1, 2) / scale
     
-    x1,y1,x2,y2 = bbox.astype(np.int32)
+#     x1,y1,x2,y2 = bbox.astype(np.int32)
     
-    cv2.rectangle(img, (x1,y1)  , (x2,y2) , (255,0,0) , 2)
-    for kp in kps:
-        kp = kp.astype(np.int32)
-        cv2.circle(img, tuple(kp) , 1, (0,0,255) , 2)
+#     cv2.rectangle(img, (x1,y1)  , (x2,y2) , (255,0,0) , 2)
+#     for kp in kps:
+#         kp = kp.astype(np.int32)
+#         cv2.circle(img, tuple(kp) , 1, (0,0,255) , 2)
         
-cv2.imwrite('hehe.jpg', img)
-print("Done")
+# cv2.imwrite('hehe.jpg', img)
+# print("Done")
 
 # for i in range(50):
 #     print("aaaaaaaaa")

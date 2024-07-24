@@ -6,15 +6,16 @@ import numpy as np
 from tqdm import tqdm
 
 device = torch.device('cuda')
-script_model = torch.jit.load('script_scrfd.ts', map_location=device)
+script_model = torch.jit.load('models/face_detection_script_scrfd_10g/1/script_scrfd.ts', map_location=device)
 
 script_model.device = device
+# script_model = script_model.half()
 
 path = '/home/longduong/projects/face_project/scrfd/t1.jpg'
 img = cv2.imread(path)
 img_t = torch.from_numpy(img).to(device)
 
-script_model = torch.jit.optimize_for_inference(script_model)
+# script_model = torch.jit.optimize_for_inference(script_model)
 
 
 # for i in tqdm(range(10000)):
@@ -26,8 +27,8 @@ script_model = torch.jit.optimize_for_inference(script_model)
 with torch.no_grad():
     # First dummy run for warmup
     for i in range(100):
-        image = torch.rand((640, 480, 3))
-        _ = script_model([image])
+        image = torch.rand((1, 640, 480, 3))
+        _ = script_model(image)
     print("Done warmup single")
 
     runs = 10000
@@ -38,8 +39,8 @@ with torch.no_grad():
         # print("random time: ", time.time() - st)
         test_tensor = torch.from_numpy(img).to(device)
         test_tensor = test_tensor + torch.rand_like(test_tensor, device=device, dtype=torch.float32) * 100
-        
-        res = script_model([test_tensor])
+        test_tensor = test_tensor.unsqueeze(0)
+        res = script_model(test_tensor)
         # res += 1
         torch.cuda.synchronize()
 
