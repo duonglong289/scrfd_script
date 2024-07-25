@@ -7,6 +7,16 @@ input: [
         name: "INPUT__0"
         data_type: TYPE_FP16
         dims: [ -1, 640, 640, 3 ]
+    },
+    {
+        name: "INPUT__1"
+        data_type: TYPE_FP16
+        dims: [ 1 ]
+    },
+    {
+        name: "INPUT__2"
+        data_type: TYPE_FP16
+        dims: [ 1 ]
     }
 ]
 

@@ -16,6 +16,7 @@ class SCRFD(nn.Module):
 
     @torch.no_grad()
     def forward(self, img: torch.Tensor):
+        batch_size: int = img.shape[0]
         # x1 = self.extract_feat(img)
         x = self.backbone(img)
         x = self.neck(x)
@@ -30,16 +31,17 @@ class SCRFD(nn.Module):
         bboxes_out = []
         kps_out = []
         
+        # for batch_ind in range(img.shape[0]):
         for ind in range(len(list_bboxes)):
-            scores = list_scores[ind][0].permute(1, 2, 0).reshape(-1, 1).sigmoid()
-            bboxes = list_bboxes[ind][0].permute(1, 2, 0)
-            bboxes = bboxes.reshape((-1,4)) # * list_strides[ind]
-            kps = list_kps[ind][0].permute(1, 2, 0)
-            kps = kps.reshape((-1, 10)) # * list_strides[ind]
+            scores = list_scores[ind].permute(0, 2, 3, 1).reshape(batch_size, -1, 1).sigmoid()
+            bboxes = list_bboxes[ind].permute(0, 2, 3, 1)
+            bboxes = bboxes.reshape((batch_size, -1, 4)) # * list_strides[ind]
+            kps = list_kps[ind].permute(0, 2, 3, 1)
+            kps = kps.reshape((batch_size, -1, 10)) # * list_strides[ind]
             
-            scores_out.append(scores.unsqueeze(0))
-            bboxes_out.append(bboxes.unsqueeze(0))
-            kps_out.append(kps.unsqueeze(0))
+            scores_out.append(scores)
+            bboxes_out.append(bboxes)
+            kps_out.append(kps)
             # scores_out.append(scores)
             # bboxes_out.append(bboxes)
             # kps_out.append(kps)
