@@ -51,26 +51,40 @@ def resize_image(image, max_size: List = None):
 
 path = '/home/longduong/projects/face_project/scrfd/t1.jpg'
 path = '/home/longduong/projects/face_project/scrfd/0886332965_FRONT_231112.jpg'
+path = 'png-clipart-santa-claus-christmas-santa-claus-holidays-christmas-decoration.png'
+
+
+# img = cv2.imread(path)
+
+# resized_img, scale = resize_image(img)
+# resized_img = np.expand_dims(resized_img, 0).astype(np.float16)
+
 img = cv2.imread(path)
-# img = cv2.resize(img, (640, 640))
+resized_img1, scale = resize_image(img)
+# resized_img = np.expand_dims(resized_img, 0).astype(np.float16)
 
-resized_img, scale = resize_image(img)
-resized_img = np.expand_dims(resized_img, 0).astype(np.float16)
-# resized_img = np.expand_dims(resized_img, 0).astype(np.float32)
+path2 = '/home/longduong/projects/face_project/scrfd/debug_script.png'
+img2 = cv2.imread(path2)
+resized_img2, scale2 = resize_image(img2)
+
+resized_img = np.array([resized_img1, resized_img2]).astype(np.float16)
+
+
 print(resized_img.shape)
 
-# processed_image = processed_image.permute(2, 0, 1)
-# processed_image = (processed_image - 127.5) * 0.0078125
-
-print(resized_img.shape)
-# img_t = img.astype(np.float32)
 # img_t = torch.from_numpy(img)
 # img_t = torch.unsqueeze(0)
 # resized_img = np.random.rand(1, 640, 640, 3).astype(np.float16)
-inputs = [input_client.InferInput('INPUT__0', resized_img.shape, 'FP16')]
-# inputs = [input_client.InferInput('INPUT__0', resized_img.shape, 'FP32')]
+inputs = [input_client.InferInput('INPUT__0', resized_img.shape, 'FP16'), input_client.InferInput('INPUT__1', [1], 'FP16'), input_client.InferInput('INPUT__2', [1], 'FP16')]
+
+threshold = np.array([0.5]).astype(np.float16)
+threshold_nms = np.array([0.4]).astype(np.float16)
+
 
 inputs[0].set_data_from_numpy(resized_img)
+inputs[1].set_data_from_numpy(threshold)
+inputs[2].set_data_from_numpy(threshold_nms)
+
 # outputs = [input_client.InferRequestedOutput('OUTPUT__0'), input_client.InferRequestedOutput('OUTPUT__1')]
 outputs = [input_client.InferRequestedOutput('OUTPUT__0')]
 
@@ -81,21 +95,22 @@ responses = triton_client.infer(model_name,
                             outputs=outputs)
 
 preds_0 = responses.as_numpy('OUTPUT__0')
-# print(preds_0.shape)
+print(preds_0.shape)
+print(preds_0[0])
 
 
 
-for res in preds_0:
-    bbox = res[:4] / scale
-    score = res[4]
-    kps = res[5:].reshape(-1, 2) / scale
+# for res in preds_0:
+#     bbox = res[:4] / scale
+#     score = res[4]
+#     kps = res[5:].reshape(-1, 2) / scale
     
-    x1,y1,x2,y2 = bbox.astype(np.int32)
+#     x1,y1,x2,y2 = bbox.astype(np.int32)
     
-    cv2.rectangle(img, (x1,y1)  , (x2,y2) , (255,0,0) , 2)
-    for kp in kps:
-        kp = kp.astype(np.int32)
-        cv2.circle(img, tuple(kp) , 1, (0,0,255) , 2)
+#     cv2.rectangle(img, (x1,y1)  , (x2,y2) , (255,0,0) , 2)
+#     for kp in kps:
+#         kp = kp.astype(np.int32)
+#         cv2.circle(img, tuple(kp) , 1, (0,0,255) , 2)
         
 cv2.imwrite('hehe.jpg', img)
 print("Done")

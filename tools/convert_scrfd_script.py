@@ -59,7 +59,6 @@ def resize_image(image, max_size: List = None):
 
     return transformed_image, scale_factor
 
-
 @torch.jit.script
 def nms_torch(dets: torch.Tensor, thresh: float = 0.4):
     x1 = dets[:, 0]
@@ -258,10 +257,12 @@ class SCRFDDetector(torch.jit.ScriptModule):
     def __init__(self, weight_path: str):
         super(SCRFDDetector, self).__init__()
         self.center_cache: Dict[str, List[torch.Tensor]] = {'0x0': [torch.tensor([1]), torch.tensor([1]), torch.tensor([1])]}
-        self.nms_threshold:float = 0.4
+        # self.nms_threshold:float = 0.4
         self.fmc: int = 3
         self._feat_stride_fpn: List[int] = [8, 16, 32]
         self._num_anchors: int = 2
+        self.input_width: int = 640
+        self.input_height: int = 640
 
         if torch.cuda.is_available():
             self.device = torch.device('cuda')
@@ -324,7 +325,7 @@ class SCRFDDetector(torch.jit.ScriptModule):
         
 
     @torch.jit.script_method
-    def forward(self, imgs: torch.Tensor):
+    def forward(self, imgs: torch.Tensor, threshold: torch.Tensor=torch.tensor([0.5]), nms_threshold: torch.Tensor=torch.tensor([0.4])):
         """
         Run detection pipeline for provided image
 
@@ -333,30 +334,36 @@ class SCRFDDetector(torch.jit.ScriptModule):
         :return: Face bboxes with scores [t,l,b,r,score], and key points
         """
         imgs = imgs.half()
-        target_size = 640
-        threshold: float = 0.5
+        threshold_value = threshold[0]
+        nms_threshold_value = nms_threshold[0]
 
         batch_size: int = len(imgs)
-        input_height = input_width = target_size
         
         processed_tensor, scale_tensor = self.preprocess_batch(imgs)
         net_outs = self.model(processed_tensor)
         
-        return_result = torch.empty((0, 15), dtype=torch.float16, device=self.device)
-        # # start_time = time.time()
-        bboxes_by_img, kpss_by_img, scores_by_img = self._postprocess(net_outs, input_height, input_width, threshold)
-
-        # # print("post process time 1: ", time.time() - start_time)
-        # # start_time = time.time()
+        bboxes_by_img, kpss_by_img, scores_by_img = self._postprocess(net_outs, self.input_height, self.input_width, threshold_value)
+        
+        # return_result = torch.empty((0, 15), dtype=torch.float16, device=self.device)
+        list_result = []
+        max_num_bbox = 0
         for index in range(batch_size):
             bbox: torch.Tensor = bboxes_by_img[index]
             kpss: torch.Tensor = kpss_by_img[index]
             scores: torch.Tensor = scores_by_img[index]
-            result = self.filter_result(bbox, kpss, scores, scale_tensor, self.nms_threshold)
-            return_result = torch.cat((return_result, result))
-
-        # print("post process time 2: ", time.time() - start_time)
-        # print("===============================================================================")
+            result = self.filter_result(bbox, kpss, scores, scale_tensor, nms_threshold_value)
+            # return_result = torch.cat((return_result, result))
+            if result.shape[0] > max_num_bbox:
+                max_num_bbox = result.shape[0]
+            list_result.append(result)
+        
+        # Pad bbox
+        return_result = torch.zeros((batch_size, max_num_bbox, 15), dtype=torch.float16, device=self.device)
+        for index in range(batch_size):
+            result_bbox = list_result[index]
+            num_bbox = result_bbox.shape[0]
+            return_result[index, :num_bbox, :] = result_bbox
+        
         return_result = return_result.to(torch.float16)
         return return_result
 
@@ -507,7 +514,7 @@ class SCRFDDetector(torch.jit.ScriptModule):
         bboxes_by_img = []
         kpss_by_img = []
         scores_by_img = []
-
+        
         for n_img in range(batch_size):
             offset = 0
             scores_list = []
@@ -536,9 +543,6 @@ class SCRFDDetector(torch.jit.ScriptModule):
             bboxes = torch.vstack(bboxes_list)
             kpss = torch.vstack(kpss_list)
             
-            # bboxes_by_img.append(torch.clone(self.bbox_list[:offset]))
-            # kpss_by_img.append(torch.clone(self.kpss_list[:offset]))
-            # scores_by_img.append(torch.clone(self.score_list[:offset]))
             scores_by_img.append(scores)
             bboxes_by_img.append(bboxes)
             kpss_by_img.append(kpss)
@@ -584,12 +588,17 @@ if __name__ == '__main__':
     path = '/home/longduong/projects/face_project/scrfd/t1.jpg'
     # path = '/mnt/hdd/spaces/genos/scrfd/0886332965_FRONT_231112.jpg'
     img = cv2.imread(path)
-    
     resized_img, scale = resize_image(img)
-    resized_img = np.expand_dims(resized_img, 0).astype(np.float16)
+    # resized_img = np.expand_dims(resized_img, 0).astype(np.float16)
     
+    path2 = '/home/longduong/projects/face_project/scrfd/debug_script.png'
+    img2 = cv2.imread(path2)
+    resized_img2, scale2 = resize_image(img2)
+    
+    batch = np.array([resized_img, resized_img2])
+    print(batch.shape)
     # resized_img = np.random.rand(1, 640, 640, 3)
-    img_t = torch.from_numpy(resized_img)
+    img_t = torch.from_numpy(batch)
     
     script_model = torch.jit.script(model)
     script_model.save("models/face_detection_script_scrfd_10g/1/script_scrfd.ts")
@@ -610,7 +619,10 @@ if __name__ == '__main__':
 
     # if kpss is not None:
     #     print(kpss.shape)
-    for res in preds_0.detach().cpu().numpy():
+    import ipdb; ipdb.set_trace()
+    print(preds_0[0])
+    
+    for res in preds_0[0].detach().cpu().numpy():
         bbox = res[:4] / scale
         score = res[4]
         kps = res[5:].reshape(-1, 2) / scale
