@@ -316,7 +316,7 @@ class SCRFDDetector(torch.jit.ScriptModule):
             neck=neck,
             bbox_head=bbox_head)
     
-        state_dict = torch.load(weight_path, map_location=torch.device('cpu'))['state_dict']
+        state_dict = torch.load(weight_path, map_location=torch.device('cpu'), weights_only=True)['state_dict']
         model_det.load_state_dict(state_dict)
         self.model = model_det
         self.model.eval()
@@ -334,8 +334,8 @@ class SCRFDDetector(torch.jit.ScriptModule):
         :return: Face bboxes with scores [t,l,b,r,score], and key points
         """
         imgs = imgs.half()
-        threshold_value = threshold[0]
-        nms_threshold_value = nms_threshold[0]
+        threshold_value = threshold[0].item()
+        nms_threshold_value = nms_threshold[0].item()
 
         batch_size: int = len(imgs)
         
@@ -351,7 +351,7 @@ class SCRFDDetector(torch.jit.ScriptModule):
             bbox: torch.Tensor = bboxes_by_img[index]
             kpss: torch.Tensor = kpss_by_img[index]
             scores: torch.Tensor = scores_by_img[index]
-            result = self.filter_result(bbox, kpss, scores, scale_tensor, nms_threshold_value)
+            result = self.filter_result(bbox, kpss, scores, scale_tensor.item(), nms_threshold_value)
             # return_result = torch.cat((return_result, result))
             if result.shape[0] > max_num_bbox:
                 max_num_bbox = result.shape[0]
@@ -553,8 +553,8 @@ class SCRFDDetector(torch.jit.ScriptModule):
     def filter_result(self, bboxes_list: torch.Tensor, 
             kpss_list: torch.Tensor,
             scores_list: torch.Tensor, 
-            scale: torch.Tensor,
-            nms_threshold: float = 0.4
+            scale: float,
+            nms_threshold: float,
             ) -> torch.Tensor:
         """
         Filter postprocessed network outputs with NMS
@@ -598,41 +598,48 @@ if __name__ == '__main__':
     batch = np.array([resized_img, resized_img2])
     print(batch.shape)
     # resized_img = np.random.rand(1, 640, 640, 3)
-    img_t = torch.from_numpy(batch)
+    img_t = torch.from_numpy(batch).cuda()
     
     script_model = torch.jit.script(model)
-    script_model.save("models/face_detection_script_scrfd_10g/1/script_scrfd.ts")
-    # script_model = torch.jit.optimize_for_inference(script_model)
-    # det_list, kp_list = script_model.detect([img])
+    script_model.save("models/face_detection_script_scrfd_10g/1/script_scrfd_torch25.ts")
+
+    script_model = torch.jit.load("models/face_detection_script_scrfd_10g/1/script_scrfd_torch25.ts", map_location='cuda')
+    script_model.eval()
+    script_model.to('cuda')
+
+    # # script_model = torch.jit.optimize_for_inference(script_model)
+    # # det_list, kp_list = script_model.detect([img])
     
     for i in tqdm(range(1)):
         # det_list, kp_list = script_model(img_t)
         # print(det_list[0].shape)
         # det_list, kp_list = model([img_t])
-        preds_0 = model.forward(img_t)
+        print(img_t.device)
+        print(script_model.device)
+        preds_0 = script_model.forward(img_t)
         print(preds_0.shape)
         # det_list, kp_list = res
         torch.cuda.synchronize()
    
-    # bboxes = det_list
-    # kpss = kp_list.reshape(-1, 5, 2)
+    # # bboxes = det_list
+    # # kpss = kp_list.reshape(-1, 5, 2)
 
-    # if kpss is not None:
-    #     print(kpss.shape)
-    import ipdb; ipdb.set_trace()
-    print(preds_0[0])
+    # # if kpss is not None:
+    # #     print(kpss.shape)
+    # import ipdb; ipdb.set_trace()
+    # print(preds_0[0])
     
-    for res in preds_0[0].detach().cpu().numpy():
-        bbox = res[:4] / scale
-        score = res[4]
-        kps = res[5:].reshape(-1, 2) / scale
+    # for res in preds_0[0].detach().cpu().numpy():
+    #     bbox = res[:4] / scale
+    #     score = res[4]
+    #     kps = res[5:].reshape(-1, 2) / scale
         
-        x1,y1,x2,y2 = bbox.astype(np.int32)
+    #     x1,y1,x2,y2 = bbox.astype(np.int32)
         
-        cv2.rectangle(img, (x1,y1)  , (x2,y2) , (255,0,0) , 2)
-        for kp in kps:
-            kp = kp.astype(np.int32)
-            cv2.circle(img, tuple(kp) , 1, (0,0,255) , 2)
+    #     cv2.rectangle(img, (x1,y1)  , (x2,y2) , (255,0,0) , 2)
+    #     for kp in kps:
+    #         kp = kp.astype(np.int32)
+    #         cv2.circle(img, tuple(kp) , 1, (0,0,255) , 2)
 
-    print('output: converted_test.png',)
-    cv2.imwrite('converted_test.png', img)
+    # print('output: converted_test.png',)
+    # cv2.imwrite('converted_test.png', img)

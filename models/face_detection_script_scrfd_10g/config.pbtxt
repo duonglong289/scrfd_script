@@ -1,12 +1,12 @@
 name: "face_detection_script_scrfd_10g"
 platform: "pytorch_libtorch"
-default_model_filename: "script_scrfd.ts"
-
+default_model_filename: "script_scrfd_torch25.ts"
+max_batch_size: 8
 input: [
     {
         name: "INPUT__0"
         data_type: TYPE_FP16
-        dims: [ -1, 640, 640, 3 ]
+        dims: [ 640, 640, 3 ]
     },
     {
         name: "INPUT__1"
@@ -24,7 +24,7 @@ output: [
     {
         name: "OUTPUT__0"
         data_type: TYPE_FP16
-        dims: [ -1, -1, 15 ]
+        dims: [ -1, 15 ]
     }
 ]
 
@@ -41,10 +41,53 @@ parameters: {
             string_value:"true"
         }
     }
+parameters: {
+  key: "DISABLE_OPTIMIZED_EXECUTION"
+      value: {
+      string_value: "true"
+      }
+}
 
-# parameters: {
-#     key: "DISABLE_OPTIMIZED_EXECUTION"
-#         value: {
-#             string_value: "true"
-#         }
-# }
+optimization {
+  input_pinned_memory {
+    enable: true
+  }
+  output_pinned_memory {
+    enable: true
+  }
+}
+
+model_warmup [{
+    name: "Single sample"
+    batch_size: 1
+    inputs: {
+        key: "INPUT__0"
+        value: {
+            data_type: TYPE_FP16
+            dims: [ 640, 640, 3]
+            random_data: true
+        }
+    }
+    inputs: {
+        key: "INPUT__1"
+        value: {
+            data_type: TYPE_FP16
+            dims: [ 1]
+            random_data: true
+        }
+    }
+    inputs: {
+        key: "INPUT__2"
+        value: {
+            data_type: TYPE_FP16
+            dims: [ 1]
+            random_data: true
+        }
+    }
+  }]
+
+version_policy: {
+  specific: {
+    versions: [1]
+  }
+}

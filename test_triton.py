@@ -51,7 +51,8 @@ def resize_image(image, max_size: List = None):
 
 path = '/home/longduong/projects/face_project/scrfd/t1.jpg'
 path = '/home/longduong/projects/face_project/scrfd/0886332965_FRONT_231112.jpg'
-path = 'png-clipart-santa-claus-christmas-santa-claus-holidays-christmas-decoration.png'
+# path = 'png-clipart-santa-claus-christmas-santa-claus-holidays-christmas-decoration.png'
+
 
 
 # img = cv2.imread(path)
@@ -71,14 +72,15 @@ resized_img = np.array([resized_img1, resized_img2]).astype(np.float16)
 
 
 print(resized_img.shape)
+batch_size = resized_img.shape[0]
 
 # img_t = torch.from_numpy(img)
 # img_t = torch.unsqueeze(0)
 # resized_img = np.random.rand(1, 640, 640, 3).astype(np.float16)
-inputs = [input_client.InferInput('INPUT__0', resized_img.shape, 'FP16'), input_client.InferInput('INPUT__1', [1], 'FP16'), input_client.InferInput('INPUT__2', [1], 'FP16')]
+inputs = [input_client.InferInput('INPUT__0', resized_img.shape, 'FP16'), input_client.InferInput('INPUT__1', [batch_size, 1], 'FP16'), input_client.InferInput('INPUT__2', [batch_size, 1], 'FP16')]
 
-threshold = np.array([0.5]).astype(np.float16)
-threshold_nms = np.array([0.4]).astype(np.float16)
+threshold = np.array([[0.5]] * batch_size).astype(np.float16)
+threshold_nms = np.array([[0.4]] * batch_size).astype(np.float16)
 
 
 inputs[0].set_data_from_numpy(resized_img)
@@ -97,8 +99,47 @@ responses = triton_client.infer(model_name,
 preds_0 = responses.as_numpy('OUTPUT__0')
 print(preds_0.shape)
 print(preds_0[0])
+detected_result = preds_0[0]
+
+factor = scale
+dets_list = []
+kpss_list = []
+probs = []
+
+# if len(detected_result):
+#     for result in detected_result:
+#         score = result[4]
+#         if score == 0:
+#             continue
+        
+#         bbox = (result[:4] / factor).astype(np.int32)
+#         kps = (result[5:] / factor).astype(np.int32).reshape(5, 2)
+        
+#         dets_list.append(bbox)
+#         probs.append(score)
+#         kpss_list.append(kps)
+
+if len(detected_result):
+    # for result in detected_result:
+    #     score = result[4]
+    #     if score == 0:
+    #         continue
+        
+    #     bbox = (result[:4] / factor).astype(np.int32)
+    #     kps = (result[5:] / factor).astype(np.int32).reshape(5, 2)
+        
+    #     dets_list.append(bbox)
+    #     probs.append(score)
+    #     kpss_list.append(kps)
+    detected_result = detected_result[detected_result[:, 4] > 0]
+    dets_list = (detected_result[:, :4] / factor).astype(np.int32)
+    
+    
+    # all_bboxes = detec
 
 
+
+print(dets_list)
 
 # for res in preds_0:
 #     bbox = res[:4] / scale
@@ -115,8 +156,3 @@ print(preds_0[0])
 cv2.imwrite('hehe.jpg', img)
 print("Done")
 
-# for i in range(50):
-#     print("aaaaaaaaa")
-
-# import time
-# time.sleep(2)
