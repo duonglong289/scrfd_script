@@ -252,8 +252,8 @@ def generate_proposals_v2(score_blob: torch.Tensor,
     return score_out, pos_bboxes, kpss_out
 
 
-# class SCRFDDetector(object):
-class SCRFDDetector(torch.jit.ScriptModule):
+class SCRFDDetector(object):
+# class SCRFDDetector(torch.jit.ScriptModule):
     def __init__(self, weight_path: str):
         super(SCRFDDetector, self).__init__()
         self.center_cache: Dict[str, List[torch.Tensor]] = {'0x0': [torch.tensor([1]), torch.tensor([1]), torch.tensor([1])]}
@@ -324,7 +324,7 @@ class SCRFDDetector(torch.jit.ScriptModule):
         self.model = self.model.half()
         
 
-    @torch.jit.script_method
+    # @torch.jit.script_method
     def forward(self, imgs: torch.Tensor, threshold: torch.Tensor=torch.tensor([0.5]), nms_threshold: torch.Tensor=torch.tensor([0.4])):
         """
         Run detection pipeline for provided image
@@ -344,7 +344,7 @@ class SCRFDDetector(torch.jit.ScriptModule):
         
         bboxes_by_img, kpss_by_img, scores_by_img = self._postprocess(net_outs, self.input_height, self.input_width, threshold_value)
         
-        # return_result = torch.empty((0, 15), dtype=torch.float16, device=self.device)
+        # Solution 1: For loop nms
         list_result = []
         max_num_bbox = 0
         for index in range(batch_size):
@@ -352,10 +352,14 @@ class SCRFDDetector(torch.jit.ScriptModule):
             kpss: torch.Tensor = kpss_by_img[index]
             scores: torch.Tensor = scores_by_img[index]
             result = self.filter_result(bbox, kpss, scores, scale_tensor.item(), nms_threshold_value)
-            # return_result = torch.cat((return_result, result))
+            
             if result.shape[0] > max_num_bbox:
                 max_num_bbox = result.shape[0]
             list_result.append(result)
+        
+        # Solution 2: Batch nms
+        # import ipdb; ipdb.set_trace()
+        # list_result = self.filter_result_batch(bboxes_by_img, kpss_by_img, scores_by_img, scale_tensor.item(), nms_threshold_value)
         
         # Pad bbox
         return_result = torch.zeros((batch_size, max_num_bbox, 15), dtype=torch.float16, device=self.device)
@@ -367,7 +371,7 @@ class SCRFDDetector(torch.jit.ScriptModule):
         return_result = return_result.to(torch.float16)
         return return_result
 
-    @torch.jit.script_method
+    # @torch.jit.script_method
     def build_anchors(self, input_height: int, input_width: int, strides: List[int], num_anchors: int) -> List[torch.Tensor]:
         """
         Precompute anchor points for provided image size
@@ -392,7 +396,7 @@ class SCRFDDetector(torch.jit.ScriptModule):
         
         return centers
 
-    @torch.jit.script_method
+    # @torch.jit.script_method
     def preprocess_batch(self, images: torch.Tensor):
         target_size: int = 640
         batch_size, image_height, image_width, _ = images.shape
@@ -465,7 +469,7 @@ class SCRFDDetector(torch.jit.ScriptModule):
         # resized_image = resized_image.permute(2, 0, 1)
         return resized_image, new_width, new_height, scale
 
-    @torch.jit.script_method
+    # @torch.jit.script_method
     def _postprocess(self, 
             net_outs: List[torch.Tensor], 
             input_height: int, 
@@ -495,7 +499,7 @@ class SCRFDDetector(torch.jit.ScriptModule):
         bboxes, kpss, scores = self._process_strides(net_outs, threshold, anchor_centers)
         return bboxes, kpss, scores
 
-    @torch.jit.script_method
+    # @torch.jit.script_method
     def _process_strides(self, 
             net_outs: List[torch.Tensor], 
             threshold: float, 
@@ -549,7 +553,7 @@ class SCRFDDetector(torch.jit.ScriptModule):
 
         return bboxes_by_img, kpss_by_img, scores_by_img
 
-    @torch.jit.script_method
+    # @torch.jit.script_method
     def filter_result(self, bboxes_list: torch.Tensor, 
             kpss_list: torch.Tensor,
             scores_list: torch.Tensor, 
@@ -580,6 +584,63 @@ class SCRFDDetector(torch.jit.ScriptModule):
         
         return result
 
+    # @torch.jit.script_method
+    def filter_result_batch(self, 
+            bboxes_list: List[torch.Tensor], 
+            kpss_list: List[torch.Tensor],
+            scores_list: List[torch.Tensor], 
+            scale: float,
+            nms_threshold: float,
+            ) -> List[torch.Tensor]:
+        """
+        Filter postprocessed network outputs with batch NMS for faster processing
+
+        :param bboxes_list: List of bboxes (Tensor) for each image in batch
+        :param kpss_list: List of keypoints (Tensor) for each image in batch
+        :param scores_list: List of scores (Tensor) for each image in batch
+        :param scale: Scale factor to apply to coordinates
+        :param nms_threshold: IoU threshold for NMS
+        :return: List of face bboxes with scores and key points for each image
+        """
+        batch_size = len(bboxes_list)
+        
+        # Prepare batch data for torchvision batch NMS
+        all_boxes = torch.cat(bboxes_list)
+        all_scores = torch.cat([scores.ravel() for scores in scores_list])
+        all_kpss = torch.cat(kpss_list)
+        
+        # Create batch indices for each box
+        batch_indices = torch.cat([torch.full((len(bboxes),), i, 
+                                dtype=torch.int64, 
+                                device=self.device) 
+                                for i, bboxes in enumerate(bboxes_list)])
+        
+        # Apply batch NMS
+        keep = torchvision.ops.boxes.batched_nms(
+            all_boxes, all_scores, batch_indices, nms_threshold)
+        
+        # Map kept indices back to their original batches
+        result_list = []
+        for i in range(batch_size):
+            batch_mask = batch_indices[keep] == i
+            batch_keep = keep[batch_mask]
+            
+            # Get boxes, scores, and keypoints for this batch
+            batch_boxes = all_boxes[batch_keep]
+            batch_scores = all_scores[batch_keep].unsqueeze(1)
+            batch_kpss = all_kpss[batch_keep]
+            
+            # Apply scaling
+            batch_boxes = (batch_boxes / scale).to(torch.float16)
+            batch_kpss = (batch_kpss / scale).to(torch.float16)
+            
+            # Combine results
+            batch_result = torch.cat((batch_boxes, batch_scores, batch_kpss), dim=1)
+            result_list.append(batch_result)
+        
+        return result_list
+    
+
 
 if __name__ == '__main__':
     from tqdm import tqdm
@@ -600,12 +661,12 @@ if __name__ == '__main__':
     # resized_img = np.random.rand(1, 640, 640, 3)
     img_t = torch.from_numpy(batch).cuda()
     
-    script_model = torch.jit.script(model)
-    script_model.save("models/face_detection_script_scrfd_10g/1/script_scrfd_torch25.ts")
+    # script_model = torch.jit.script(model)
+    # script_model.save("models/face_detection_script_scrfd_10g/1/script_scrfd_torch25.ts")
 
-    script_model = torch.jit.load("models/face_detection_script_scrfd_10g/1/script_scrfd_torch25.ts", map_location='cuda')
-    script_model.eval()
-    script_model.to('cuda')
+    # script_model = torch.jit.load("models/face_detection_script_scrfd_10g/1/script_scrfd_torch25.ts", map_location='cuda')
+    # script_model.eval()
+    # script_model.to('cuda')
 
     # # script_model = torch.jit.optimize_for_inference(script_model)
     # # det_list, kp_list = script_model.detect([img])
@@ -613,11 +674,11 @@ if __name__ == '__main__':
     for i in tqdm(range(1)):
         # det_list, kp_list = script_model(img_t)
         # print(det_list[0].shape)
-        # det_list, kp_list = model([img_t])
-        print(img_t.device)
-        print(script_model.device)
-        preds_0 = script_model.forward(img_t)
-        print(preds_0.shape)
+        det_list, kp_list = model.forward(img_t)
+        # print(img_t.device)
+        # print(script_model.device)
+        # preds_0 = script_model.forward(img_t)
+        # print(preds_0.shape)
         # det_list, kp_list = res
         torch.cuda.synchronize()
    
