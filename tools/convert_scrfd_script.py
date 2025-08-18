@@ -10,6 +10,7 @@ from typing import Union, Dict, List, Tuple
 
 import cv2
 import numpy as np
+import os
 import torch
 import torch.nn as nn
 import torchvision.transforms as T
@@ -299,8 +300,8 @@ def generate_proposals_batch(score_blobs: torch.Tensor,
     
     return scores_out, bboxes_out, kpss_out
 
-# class SCRFDDetector(object):
-class SCRFDDetector(torch.jit.ScriptModule):
+class SCRFDDetector(nn.Module):
+# class SCRFDDetector(torch.jit.ScriptModule):
     def __init__(self, weight_path: str):
         super(SCRFDDetector, self).__init__()
         self.center_cache: Dict[str, List[torch.Tensor]] = {'0x0': [torch.tensor([1]), torch.tensor([1]), torch.tensor([1])]}
@@ -310,6 +311,7 @@ class SCRFDDetector(torch.jit.ScriptModule):
         self._num_anchors: int = 2
         self.input_width: int = 640
         self.input_height: int = 640
+        self._warmed_up: bool = False
 
         if torch.cuda.is_available():
             self.device = torch.device('cuda')
@@ -318,7 +320,6 @@ class SCRFDDetector(torch.jit.ScriptModule):
 
         self.init_model(weight_path)
 
-    @torch.jit.ignore
     def init_model(self, weight_path: str):
         block_cfg = {
             'block': 'BasicBlock', 
@@ -369,9 +370,30 @@ class SCRFDDetector(torch.jit.ScriptModule):
         self.model.eval()
         self.model.to(self.device)
         self.model = self.model.half()
-        
 
-    @torch.jit.script_method
+    def warmup_model(self, num_warmup_runs: int = 3):
+        # Lazy warmup on first forward call
+        # if not self._warmed_up:
+        with torch.no_grad():
+            for _ in range(num_warmup_runs):
+                self._do_warmup()
+
+    def _do_warmup(self):
+        """
+        Internal warmup method that can be called from scripted methods
+        """
+        # Create realistic dummy input that will likely produce detections
+        dummy_input = torch.rand(1, self.input_width, self.input_height, 3, 
+                                 dtype=torch.float16, device=self.device)
+        
+        # Run a single warmup iteration with low threshold
+        # Process the warmup input through the pipeline
+        processed_tensor, scale_tensor = self.preprocess_batch(dummy_input)
+        net_outs = self.model(processed_tensor)
+        bboxes_by_img, kpss_by_img, scores_by_img = self._postprocess(net_outs, self.input_height, self.input_width, 0.01)
+        
+        final_warmup_res = self.filter_result_batch(bboxes_by_img, kpss_by_img, scores_by_img, scale_tensor.item(), 0.4)
+
     def forward(self, imgs: torch.Tensor, threshold: torch.Tensor=torch.tensor([0.5]), nms_threshold: torch.Tensor=torch.tensor([0.4])):
         """
         Run detection pipeline for provided image
@@ -380,6 +402,11 @@ class SCRFDDetector(torch.jit.ScriptModule):
         :param threshold: Confidence threshold
         :return: Face bboxes with scores [t,l,b,r,score], and key points
         """
+        
+        # if not self._warmed_up:
+        #     self.warmup_model(num_warmup_runs=5)
+        #     self._warmed_up = True
+        
         imgs = imgs.half()
         threshold_value = threshold[0].item()
         nms_threshold_value = nms_threshold[0].item()
@@ -423,7 +450,7 @@ class SCRFDDetector(torch.jit.ScriptModule):
         return_result = return_result.to(torch.float16)
         return return_result
 
-    @torch.jit.script_method
+    
     def build_anchors(self, input_height: int, input_width: int, strides: List[int], num_anchors: int) -> List[torch.Tensor]:
         """
         Precompute anchor points for provided image size
@@ -448,7 +475,7 @@ class SCRFDDetector(torch.jit.ScriptModule):
         
         return centers
 
-    @torch.jit.script_method
+    
     def preprocess_batch(self, images: torch.Tensor):
         target_size: int = 640
         batch_size, image_height, image_width, _ = images.shape
@@ -521,7 +548,7 @@ class SCRFDDetector(torch.jit.ScriptModule):
         # resized_image = resized_image.permute(2, 0, 1)
         return resized_image, new_width, new_height, scale
 
-    @torch.jit.script_method
+    
     def _postprocess(self, 
             net_outs: List[torch.Tensor], 
             input_height: int, 
@@ -553,7 +580,7 @@ class SCRFDDetector(torch.jit.ScriptModule):
         bboxes, kpss, scores = self._process_strides_batch(net_outs, threshold, anchor_centers)
         return bboxes, kpss, scores
 
-    @torch.jit.script_method
+    
     def _process_strides(self, 
             net_outs: List[torch.Tensor], 
             threshold: float, 
@@ -607,7 +634,7 @@ class SCRFDDetector(torch.jit.ScriptModule):
 
         return bboxes_by_img, kpss_by_img, scores_by_img
 
-    @torch.jit.script_method
+    
     def _process_strides_batch(self, 
             net_outs: List[torch.Tensor], 
             threshold: float, 
@@ -661,7 +688,7 @@ class SCRFDDetector(torch.jit.ScriptModule):
         return bboxes_by_img, kpss_by_img, scores_by_img
         
 
-    @torch.jit.script_method
+    
     def filter_result(self, bboxes_list: torch.Tensor, 
             kpss_list: torch.Tensor,
             scores_list: torch.Tensor, 
@@ -692,7 +719,7 @@ class SCRFDDetector(torch.jit.ScriptModule):
         
         return result
 
-    @torch.jit.script_method
+    
     def filter_result_batch(self, 
             bboxes_list: List[torch.Tensor], 
             kpss_list: List[torch.Tensor],
@@ -770,9 +797,17 @@ if __name__ == '__main__':
     img_t = torch.from_numpy(batch).cuda()
     
     script_model = torch.jit.script(model)
-    save_path = "models/face_detection_script_scrfd_10g/1/script_scrfd_torch25_batch.ts"
+    
+    # save_dir = "models/face_detection_script_scrfd_10g_batch_warmup/1"
+    # os.makedirs(save_dir, exist_ok=True)
+
+    save_dir = "models/face_detection_script_scrfd_10g_batch/1"
+    os.makedirs(save_dir, exist_ok=True)
+
+    save_path = f"{save_dir}/script_scrfd_torch25_batch.ts"
     script_model.save(save_path)
 
+    print("Load script model")
     script_model = torch.jit.load(save_path, map_location='cuda')
     script_model.eval()
     script_model.to('cuda')

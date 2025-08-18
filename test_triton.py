@@ -3,10 +3,13 @@ import cv2
 import tritonclient.grpc as input_client
 from tqdm import tqdm
 from typing import List
+import time
 
 # model_name = 'backbone_det'
-model_name = 'face_detection_script_scrfd_10g'
+# model_name = 'face_detection_script_scrfd_10g'
 # model_name = 'face_detection_script_scrfd_10g_32'
+# model_name = 'face_detection_script_scrfd_10g_batch_warmup'
+model_name = 'face_detection_script_scrfd_10g_batch'
 model_version = '1'
 triton_url = 'localhost:12001'
 
@@ -51,9 +54,6 @@ def resize_image(image, max_size: List = None):
 
 path = '/home/longduong/projects/face_project/scrfd/t1.jpg'
 path = '/home/longduong/projects/face_project/scrfd/0886332965_FRONT_231112.jpg'
-# path = 'png-clipart-santa-claus-christmas-santa-claus-holidays-christmas-decoration.png'
-
-
 
 # img = cv2.imread(path)
 
@@ -68,7 +68,8 @@ path2 = '/home/longduong/projects/face_project/scrfd/debug_script.png'
 img2 = cv2.imread(path2)
 resized_img2, scale2 = resize_image(img2)
 
-resized_img = np.array([resized_img1, resized_img2]).astype(np.float16)
+# resized_img = np.array([resized_img1, resized_img2]).astype(np.float16)
+resized_img = np.array([resized_img1]).astype(np.float16)
 
 
 print(resized_img.shape)
@@ -78,9 +79,12 @@ batch_size = resized_img.shape[0]
 # img_t = torch.unsqueeze(0)
 # resized_img = np.random.rand(1, 640, 640, 3).astype(np.float16)
 inputs = [input_client.InferInput('INPUT__0', resized_img.shape, 'FP16'), input_client.InferInput('INPUT__1', [batch_size, 1], 'FP16'), input_client.InferInput('INPUT__2', [batch_size, 1], 'FP16')]
+# inputs = [input_client.InferInput('INPUT__0', resized_img.shape, 'FP16'), input_client.InferInput('INPUT__1', [1], 'FP16'), input_client.InferInput('INPUT__2', [1], 'FP16')]
 
 threshold = np.array([[0.5]] * batch_size).astype(np.float16)
 threshold_nms = np.array([[0.4]] * batch_size).astype(np.float16)
+# threshold = np.array([0.5]).astype(np.float16)
+# threshold_nms = np.array([0.4]).astype(np.float16)
 
 
 inputs[0].set_data_from_numpy(resized_img)
@@ -91,6 +95,7 @@ inputs[2].set_data_from_numpy(threshold_nms)
 outputs = [input_client.InferRequestedOutput('OUTPUT__0')]
 
 # for i in tqdm(range(10000)):
+start = time.time()
 responses = triton_client.infer(model_name,
                             inputs,
                             model_version=model_version,
@@ -101,6 +106,7 @@ print(preds_0.shape)
 print(preds_0[0])
 detected_result = preds_0[0]
 
+print("Time: ", time.time() - start)
 factor = scale
 dets_list = []
 kpss_list = []
@@ -141,7 +147,7 @@ if len(detected_result):
 
 print(dets_list)
 
-# for res in preds_0:
+# for res in preds_0[0]:
 #     bbox = res[:4] / scale
 #     score = res[4]
 #     kps = res[5:].reshape(-1, 2) / scale
@@ -153,6 +159,19 @@ print(dets_list)
 #         kp = kp.astype(np.int32)
 #         cv2.circle(img, tuple(kp) , 1, (0,0,255) , 2)
         
-cv2.imwrite('hehe.jpg', img)
-print("Done")
+# cv2.imwrite('hehe.jpg', img)
+# print("Done")
 
+
+
+'''
+Model batch:
+[[ 59.62  270.8   102.8   331.2     0.839  71.4   296.2    92.2   295.2
+   82.44  307.     74.75  318.8    89.7   318.   ]]
+
+
+Model old:
+[[ 59.62  270.8   102.8   331.2     0.839  71.4   296.2    92.2   295.2
+   82.44  307.     74.75  318.8    89.7   318.   ]]
+
+'''
